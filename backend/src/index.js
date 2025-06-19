@@ -9,29 +9,37 @@ dotenv.config({
 })
 
 const app = express();
+
 app.use(
   cors({
     origin: process.env.CORS_ORIGIN,
     credentials: true,
   })
 );
+
 app.use(
   express.json({
     limit: "128kb",
   })
 );
+
 app.use(
   express.urlencoded({
     extended: true,
     limit: "128kb",
   })
 );
+
 app.use(express.static("public"));
 app.use(cookieParser());
 
 //Import routes
-
+import userRouter from "./routes/user.routes.js"
+import moderatorRouter from "./routes/moderator.routes.js"
 //Routes declaration
+app.use("/api/users",userRouter)
+app.use("/api/moderators",moderatorRouter)
+
 
 connectDB()
 .then(()=>{

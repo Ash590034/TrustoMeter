@@ -1,10 +1,14 @@
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { ApiError } from "../utils/ApiError.js";
-import { User } from "../models/user.model.js";
-import { Product } from "../models/product.model.js";
-import { Review } from "../models/review.model.js";
+import  {User}  from "../models/user.model.js";
+import {Product}  from "../models/product.model.js";
+import {Review} from "../models/review.model.js";
 import { ApiResponse } from "../utils/ApiResponse.js";
 import jwt from "jsonwebtoken";
+
+// import { HfInference } from '@huggingface/inference';
+
+// const hf = new HfInference(process.env.HF_TOKEN);
 
 const options = {
     httpOnly: true,
@@ -101,6 +105,32 @@ const logout = asyncHandler(async (req, res) => {
       .json(new ApiResponse(200, {}, "User logged out successfully!"));
 });
 
+const getProducts = asyncHandler(async (req, res) => {
+  try {
+    const products = await Product.find();
+
+    return res.status(200).json(
+      new ApiResponse(200, { products }, "Products fetched successfully!")
+    );
+  } catch (error) {
+    throw new ApiError(500, "Something went wrong while getting products list!");
+  }
+});
+
+const getProductsByCategory = asyncHandler(async (req, res) => {
+  const { id: category } = req.params;
+
+  try {
+    const products = await Product.find({ category });
+
+    res.status(200).json(
+      new ApiResponse(200, { products }, `${category}s fetched successfully!`)
+    );
+  } catch (error) {
+    throw new ApiError(500, `Something went wrong while getting ${category} list!`);
+  }
+});
+
 const getCurrentUser = asyncHandler(async (req, res) => {
     return res
       .status(200)
@@ -139,13 +169,29 @@ const addReview = asyncHandler(async (req, res) => {
         throw new ApiError(400, "You have already reviewed this product");
       }
   
+      // const reviewAnalysis = await hf.textClassification({
+      //   model: 'theArijitDas/distilbert-finetuned-fake-reviews',
+      //   inputs: comment
+      // });
+
+      // const {label , score} = reviewAnalysis[0];
+
+      // const newReview = await Review.create({
+      //   user: userId,
+      //   product: productId,
+      //   rating,
+      //   comment,
+      //   trustScore: score,
+      //   isFlagged: label==="CG"
+      // });
+
       const newReview = await Review.create({
         user: userId,
         product: productId,
         rating,
         comment,
       });
-  
+
       const newCount = product.ratings.count + 1;
       const newAvg =
         (product.ratings.average * product.ratings.count + rating) / newCount;
@@ -173,5 +219,7 @@ export {
     logout,
     getCurrentUser,
     getUserById,
+    getProducts,
+    getProductsByCategory,
     addReview,
 }

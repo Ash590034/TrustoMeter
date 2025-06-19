@@ -1,32 +1,91 @@
-import { Product } from "../models/product.model";
-import { Moderator } from "../models/moderator.model";
+import { Product } from "../models/product.model.js";
+import { Moderator } from "../models/moderator.model.js";
 import { Review } from "../models/review.model.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { ApiError } from "../utils/ApiError.js";
 import { ApiResponse } from "../utils/ApiResponse.js";
+import jwt from 'jsonwebtoken';
 
-const getFlaggedReviews = asyncHandler(async(req , res) => {
+const options = {
+  httpOnly: true,
+  secure: true,
+};
+
+const generateModeratorToken = async (moderatorId) => {
+  const moderator = await Moderator.findById(moderatorId);
+
+  if (!moderator) throw new ApiError(404, 'Moderator not found!');
+
+  const token = jwt.sign(
+    { _id: moderator._id, email: moderator.email, fullName: moderator.fullName },
+    process.env.TOKEN_SECRET,
+  );
+  return { token };
+};
+
+const registerModerator = asyncHandler(async (req, res) => {
+  try {
+    const { fullName, email, password } = req.body;
+  
+    if (!email || !password) throw new ApiError(400, 'Email and password are mandatory!');
+  
+    const existingModerator = await Moderator.findOne({ email })
+    if (existingModerator) throw new ApiError(409, 'Moderator already exists!');
+  
+    const moderator = await Moderator.create({ fullName, email, password });
+  
+    const moderatorObj = moderator.toObject();
+    delete moderatorObj.password;
+  
+    res.status(201).json(new ApiResponse(201, moderatorObj, 'Moderator registered successfully!'));
+  } catch (error) {
+    throw new ApiError(500, "Something went wrong while registering the moderator!");
+  }
+});
+
+const loginModerator = asyncHandler(async (req, res) => {
+  try {
+    const { email, password } = req.body;
+  
+    if (!email || !password) throw new ApiError(400, 'Email and password are required!');
+  
+    const moderator = await Moderator.findOne({ email });
+  
+    if (!moderator) throw new ApiError(404, 'Moderator does not exist!');
+  
+    const isPasswordCorrect = await moderator.isPasswordCorrect(password)
+    if (!isPasswordCorrect) throw new ApiError(401, 'Incorrect password!');
+  
+    const { token } = await generateModeratorToken(moderator._id);
+    const safeModerator = await Moderator.findById(moderator._id).select('-password');
+  
+    res
+      .status(200)
+      .cookie('modToken', token, options)
+      .json(new ApiResponse(200, { moderator: safeModerator, token }, 'Moderator logged in successfully!'));
+  } catch (error) {
+    throw new ApiError(500, "Something went wrong while logging in the moderator!");
+  }
+});
+
+const logoutModerator = asyncHandler(async (req, res) => {
+  res
+    .status(200)
+    .clearCookie('modToken', options)
+    .json(new ApiResponse(200, {}, 'Moderator logged out successfully!'));
+});
+
+const getFlaggedProductsAndReviews = asyncHandler(async(req , res) => {
     try {
         const flaggedReviews = await Review.find({isFlagged: true})
+        const flaggedProducts = await Product.find({ isFlagged: true });
         return res.status(200).json(
-            new ApiResponse(200,{flaggedReviews},"Flagged Reviews fetched successfully!")
+            new ApiResponse(200,{flaggedReviews , flaggedProducts},"Flagged Reviews and Products fetched successfully!")
         )
     } catch (error) {
-        throw new ApiError(500,"Something went wrong while getting flagged reviews!")
+        throw new ApiError(500,"Something went wrong while getting flagged reviews and products!")
     }
 })
-
-const getFlaggedProducts = asyncHandler(async (req, res) => {
-    try {
-      const flaggedProducts = await Product.find({ isFlagged: true });
-  
-      return res.status(200).json(
-        new ApiResponse(200, { flaggedProducts }, "Flagged products fetched successfully!")
-      );
-    } catch (error) {
-      throw new ApiError(500, "Something went wrong while getting flagged products!");
-    }
-});
   
 const approveFlaggedReview = asyncHandler(async (req, res) => {
     const { id: reviewId } = req.params;
@@ -129,8 +188,10 @@ const dismissFlaggedProduct = asyncHandler(async (req, res) => {
 });
   
 export {
-    getFlaggedReviews,
-    getFlaggedProducts,
+    registerModerator,
+    loginModerator,
+    logoutModerator,
+    getFlaggedProductsAndReviews,
     approveFlaggedReview,
     dismissFlaggedReview,
     approveFlaggedProduct,
