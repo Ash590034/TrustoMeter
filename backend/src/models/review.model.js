@@ -3,8 +3,7 @@ import mongoose,{Schema} from 'mongoose';
 const reviewSchema = new Schema(
   {
     user: {
-      type: Schema.Types.ObjectId,
-      ref: 'User',
+      type: String,
       required: true,
     },
     product: {
@@ -33,8 +32,11 @@ const reviewSchema = new Schema(
     },
     approvedByModerator: {
       type: Boolean,
-      default: 0,
-    }
+      default: false,
+    },
+    reasons: [
+      {type: String},
+    ]
   },
   { timestamps: true }
 );

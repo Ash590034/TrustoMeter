@@ -5,10 +5,8 @@ import {Product}  from "../models/product.model.js";
 import {Review} from "../models/review.model.js";
 import { ApiResponse } from "../utils/ApiResponse.js";
 import jwt from "jsonwebtoken";
-
-// import { HfInference } from '@huggingface/inference';
-
-// const hf = new HfInference(process.env.HF_TOKEN);
+import { analyzeReview } from '../utils/reviewAnalyzer.js';
+import { analyzeProduct } from '../utils/productAnalyzer.js';
 
 const options = {
     httpOnly: true,
@@ -18,6 +16,7 @@ const options = {
 const generateToken = async (userId) => {
     try {
       const user = await User.findById(userId); 
+
       if (!user) throw new ApiError(404, "User not found!");
   
       const token = jwt.sign(
@@ -39,8 +38,8 @@ const register = asyncHandler(async (req, res) => {
     try {
       const { fullName, email, password } = req.body;
   
-      if (!email || !password) {
-        throw new ApiError(400, "Email and password are mandatory.");
+      if (!email || !password || !fullName) {
+        throw new ApiError(400, "All fields are required.");
       }
   
       const userExistsAlready = await User.findOne({ email });
@@ -56,10 +55,13 @@ const register = asyncHandler(async (req, res) => {
   
       const userObj = user.toObject();
       delete userObj.password;
+
+      const { token } = await generateToken(user._id);
   
       return res
         .status(201)
-        .json(new ApiResponse(201, userObj, "User registered successfully"));
+        .cookie("token", token, options)
+        .json(new ApiResponse(201,{ user:userObj }, "User registered successfully"));
     } catch (error) {
       throw new ApiError(500, "Something went wrong while registering the user!");
     }
@@ -107,7 +109,15 @@ const logout = asyncHandler(async (req, res) => {
 
 const getProducts = asyncHandler(async (req, res) => {
   try {
-    const products = await Product.find();
+    const products = await Product.find()
+      .populate({
+        path: 'reviews',
+        select: 'rating comment createdAt user',
+        populate: {
+          path: 'user',
+          select: 'fullName'
+        }
+    });
 
     return res.status(200).json(
       new ApiResponse(200, { products }, "Products fetched successfully!")
@@ -152,44 +162,35 @@ const getUserById = asyncHandler(async (req, res) => {
       throw new ApiError(500, "Something went wrong while fetching this user!");
     }
 });
-  
+
 const addReview = asyncHandler(async (req, res) => {
     const { id: productId } = req.params;
     const { rating, comment } = req.body;
-    const userId = req.user._id;
+    const user = req.user;
   
     try {
       const product = await Product.findById(productId);
       if (!product) {
         throw new ApiError(404, "Product not found");
       }
-  
+      
+      const productCategory = product.category;
+
       const alreadyReviewed = await Review.findOne({ product: productId, user: userId });
       if (alreadyReviewed) {
         throw new ApiError(400, "You have already reviewed this product");
       }
-  
-      // const reviewAnalysis = await hf.textClassification({
-      //   model: 'theArijitDas/distilbert-finetuned-fake-reviews',
-      //   inputs: comment
-      // });
-
-      // const {label , score} = reviewAnalysis[0];
-
-      // const newReview = await Review.create({
-      //   user: userId,
-      //   product: productId,
-      //   rating,
-      //   comment,
-      //   trustScore: score,
-      //   isFlagged: label==="CG"
-      // });
+      
+      const analysis = await analyzeReview(comment, { productCategory, rating });
 
       const newReview = await Review.create({
-        user: userId,
+        user: user.fullName,
         product: productId,
         rating,
         comment,
+        isFlagged:analysis.isFake,
+        trustScore: analysis.confidence,
+        reasons: analysis.reasons,
       });
 
       const newCount = product.ratings.count + 1;
@@ -209,8 +210,60 @@ const addReview = asyncHandler(async (req, res) => {
       throw new ApiError(500, "Something went wrong while adding the review");
     }
 });
-  
 
+const addProduct = asyncHandler(async (req, res) => {
+  const { name, description, price, category, images } = req.body;
+  const user = req.user;
+
+  if (!name || !description || !price || !category) {
+    throw new ApiError(400, "Name, description, price and category are mandatory fields!");
+  }
+
+  try {
+    const product = await Product.create({
+      name,
+      price,
+      description,
+      category,
+      images
+    });
+
+    const analysis = await analyzeProduct(product);
+    product.analysis = analysis;
+    await product.save();
+    
+    await User.findByIdAndUpdate(
+      user._id,
+      { $push: { listedProducts: product._id } },
+      { new: true }
+    );
+
+    res.status(200).json(
+      new ApiResponse(200, { product }, "Product added successfully!")
+    );
+  } catch (error) {
+    throw new ApiError(500, "Something went wrong while adding the product!");
+  }
+});
+
+const getAllReviewsForProduct = asyncHandler(async(req,res) => {
+  const { id:productId } = req.params;
+  try {
+    const product = await Product.findById(productId);
+    if (!product) {
+      throw new ApiError(404, "Product not found");
+    }
+
+    const reviews = await Review.find({product:productId})
+
+    return res.status(201).json(
+      new ApiResponse(201, { reviews }, "Reviews fetched successfully!")
+    );
+  } catch (error) {
+    throw new ApiError(500, "Something went wrong while fetching the reviews");
+  }
+})
+  
 
 export {
     generateToken,
@@ -222,4 +275,6 @@ export {
     getProducts,
     getProductsByCategory,
     addReview,
+    getAllReviewsForProduct,
+    addProduct,
 }

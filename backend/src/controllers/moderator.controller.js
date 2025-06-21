@@ -1,10 +1,11 @@
 import { Product } from "../models/product.model.js";
-import { Moderator } from "../models/moderator.model.js";
+import { User } from "../models/user.model.js";
 import { Review } from "../models/review.model.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { ApiError } from "../utils/ApiError.js";
 import { ApiResponse } from "../utils/ApiResponse.js";
 import jwt from 'jsonwebtoken';
+import { Moderator } from "../models/moderator.model.js"
 
 const options = {
   httpOnly: true,
@@ -29,15 +30,20 @@ const registerModerator = asyncHandler(async (req, res) => {
   
     if (!email || !password) throw new ApiError(400, 'Email and password are mandatory!');
   
-    const existingModerator = await Moderator.findOne({ email })
+    const existingModerator = await User.findOne({ email })
     if (existingModerator) throw new ApiError(409, 'Moderator already exists!');
   
     const moderator = await Moderator.create({ fullName, email, password });
   
     const moderatorObj = moderator.toObject();
     delete moderatorObj.password;
+
+    const { token } = await generateModeratorToken(moderator._id);
   
-    res.status(201).json(new ApiResponse(201, moderatorObj, 'Moderator registered successfully!'));
+    res
+    .status(201)
+    .cookie('modToken', token, options)
+    .json(new ApiResponse(201, {moderator: moderatorObj}, 'Moderator registered successfully!'));
   } catch (error) {
     throw new ApiError(500, "Something went wrong while registering the moderator!");
   }
@@ -168,24 +174,30 @@ const approveFlaggedProduct = asyncHandler(async (req, res) => {
 });
 
 const dismissFlaggedProduct = asyncHandler(async (req, res) => {
-    const { id: productId } = req.params;
-  
-    try {
+  const { id: productId } = req.params;
+
+  try {
       await Review.deleteMany({ product: productId });
-  
-      const deletedProduct = await Product.findByIdAndDelete(productId);
-  
-      if (!deletedProduct) {
-        throw new ApiError(404, "Product not found");
-      }
-  
-      return res.status(200).json(
-        new ApiResponse(200, {}, "Flagged product and its reviews deleted successfully!")
+
+      await User.updateMany(
+          { listedProducts: productId },
+          { $pull: { listedProducts: productId } }
       );
-    } catch (error) {
+
+      const deletedProduct = await Product.findByIdAndDelete(productId);
+
+      if (!deletedProduct) {
+          throw new ApiError(404, "Product not found");
+      }
+
+      return res.status(200).json(
+          new ApiResponse(200, {}, "Flagged product and its reviews deleted successfully!")
+      );
+  } catch (error) {
       throw new ApiError(500, "Something went wrong while dismissing the product!");
-    }
+  }
 });
+
   
 export {
     registerModerator,

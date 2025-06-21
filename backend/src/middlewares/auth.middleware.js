@@ -7,9 +7,10 @@ import { Moderator } from "../models/moderator.model.js";
 export const verifyJWTUser = asyncHandler(async (req, res, next) => {
     try {
         const token = req.cookies?.jwt || req.header("Authorization")?.replace("Bearer ", "");
-        if (!token) throw new ApiError(401, "No token provided!");
+        if (!token) throw new ApiError(401, "Unauthorized Access!");
 
         const decoded = jwt.verify(token, process.env.JWT_SECRET);
+        
         const user = await User.findById(decoded?._id).select("-password");
         if (!user) throw new ApiError(401, "Invalid token!");
         req.user = user;
@@ -22,7 +23,7 @@ export const verifyJWTUser = asyncHandler(async (req, res, next) => {
 export const verifyJWTModerator = asyncHandler(async (req, res, next) => {
     try {
         const token = req.cookies?.jwt || req.header("Authorization")?.replace("Bearer ", "");
-        if (!token) throw new ApiError(401, "No token provided!");
+        if (!token) throw new ApiError(401, "Unauthorized Access!");
 
         const decoded = jwt.verify(token, process.env.JWT_SECRET);
 

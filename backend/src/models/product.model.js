@@ -23,13 +23,14 @@ const productSchema = new Schema(
     images: [
       {
         url: String,
-        alt: String,
       },
     ],
     ratings: {
       average: { 
         type: Number,
-        default: 5 
+        default: 5,
+        min: 0,
+        max: 5
       },
       count: { 
         type: Number, 
@@ -40,14 +41,60 @@ const productSchema = new Schema(
         {
             type: Schema.Types.ObjectId,
             ref: 'Review',
-            required: true,
         },
     ],
-    trustScore: {
+    analysis: {
+      trustScore: {
         type: Number,
-        default: 100,
         min: 0,
         max: 100,
+        default: null,
+      },
+      summary: {
+        type: String,
+      },
+      redFlags: [String],
+      verification: {
+        descriptionCheck: {
+          isConsistent: Boolean,
+          quality: {
+            type: String,
+            enum: ['Good', 'Average', 'Poor', 'Unknown'],
+          },
+          findings: String,
+        },
+        priceCheck: {
+          status: {
+            type: String,
+            enum: ['Reasonable', 'Slightly Off', 'Too Low', 'Too High', 'Unknown'],
+          },
+          findings: String,
+        },
+        imageCheck: {
+          authenticity: {
+            type: String,
+            enum: ['Authentic', 'Stock Photo', 'Suspicious', 'No Images', 'Unknown'],
+          },
+          findings: String,
+        },
+        sellerCheck: {
+          status: {
+            type: String,
+            enum: ['Reputable', 'Generic', 'Unknown', 'Suspicious'],
+          },
+          findings: String,
+        },
+        brandCheck: {
+          status: {
+            type: String,
+            enum: ['Present', 'Unverified', 'Missing'],
+          },
+          findings: String,
+        }
+      },
+      analyzedAt: {
+        type: Date,
+      }
     },
     isFlagged: {
       type: Boolean,
@@ -55,7 +102,7 @@ const productSchema = new Schema(
     },
     approvedByModerator: {
       type: Boolean,
-      default: 0,
+      default: false,
     }
   },
   { timestamps: true }
