@@ -6,6 +6,7 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useStore } from '@/store/useStore';
+import { toast } from 'react-hot-toast'
 
 import { Plus, X } from 'lucide-react';
 
@@ -63,30 +64,18 @@ const AddProductModal = ({ isOpen, onClose }) => {
     e.preventDefault();
 
     if (!formData.name || !formData.description || !formData.price || !formData.category) {
-      toast({
-        title: "Missing Information",
-        description: "Please fill in all required fields.",
-        variant: "destructive",
-      });
+      toast.error("All fields are mandatory");
       return;
     }
 
     if (isNaN(Number(formData.price)) || Number(formData.price) <= 0) {
-      toast({
-        title: "Invalid Price",
-        description: "Please enter a valid price.",
-        variant: "destructive",
-      });
+      toast.error("Price should be a positive number");
       return;
     }
 
     const validImages = formData.images.filter(img => img.url.trim() !== '');
     if (validImages.length === 0) {
-      toast({
-        title: "No Images",
-        description: "Please add at least one product image URL.",
-        variant: "destructive",
-      });
+      toast.error("Please add atleast one image");
       return;
     }
 
@@ -99,10 +88,7 @@ const AddProductModal = ({ isOpen, onClose }) => {
         images: validImages
       });
 
-      toast({
-        title: "Success",
-        description: "Product added successfully and is being analyzed for trust score!",
-      });
+      toast.success("Product added successfully")
 
       // Reset form
       setFormData({
@@ -115,11 +101,7 @@ const AddProductModal = ({ isOpen, onClose }) => {
 
       onClose();
     } catch (error) {
-      toast({
-        title: "Error",
-        description: error.response?.data?.message || "Failed to add product",
-        variant: "destructive",
-      });
+      toast.error("Failed to add product")
     }
   };
 
