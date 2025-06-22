@@ -5,12 +5,13 @@ import {Product}  from "../models/product.model.js";
 import {Review} from "../models/review.model.js";
 import { ApiResponse } from "../utils/ApiResponse.js";
 import jwt from "jsonwebtoken";
-import { analyzeReview } from '../utils/reviewAnalyzer.js';
-import { analyzeProduct } from '../utils/productAnalyzer.js';
+import { analyzeReview } from '../utils/reviewAnalysis.js';
+import { analyzeProduct } from '../utils/productAnalysis.js';
 
 const options = {
     httpOnly: true,
     secure: true,
+    sameSite: "lax"
 };
 
 const generateToken = async (userId) => {
@@ -25,7 +26,7 @@ const generateToken = async (userId) => {
           email: user.email,
           fullName: user.fullName,
         },
-        process.env.TOKEN_SECRET,
+        process.env.JWT_SECRET,
       );
   
       return { token };
@@ -104,6 +105,7 @@ const logout = asyncHandler(async (req, res) => {
     return res
       .status(200)
       .clearCookie("token", options)
+      .cookie("token", "", { ...options, maxAge: 0 })
       .json(new ApiResponse(200, {}, "User logged out successfully!"));
 });
 
@@ -176,7 +178,7 @@ const addReview = asyncHandler(async (req, res) => {
       
       const productCategory = product.category;
 
-      const alreadyReviewed = await Review.findOne({ product: productId, user: userId });
+      const alreadyReviewed = await Review.findOne({ product: productId, user: user.fullName });
       if (alreadyReviewed) {
         throw new ApiError(400, "You have already reviewed this product");
       }
@@ -221,6 +223,7 @@ const addProduct = asyncHandler(async (req, res) => {
 
   try {
     const product = await Product.create({
+      createdBy: user._id,
       name,
       price,
       description,
@@ -230,6 +233,11 @@ const addProduct = asyncHandler(async (req, res) => {
 
     const analysis = await analyzeProduct(product);
     product.analysis = analysis;
+
+    if(analysis.trustScore < 40){
+      product.isFlagged = true
+    }
+    
     await product.save();
     
     await User.findByIdAndUpdate(
@@ -262,6 +270,29 @@ const getAllReviewsForProduct = asyncHandler(async(req,res) => {
   } catch (error) {
     throw new ApiError(500, "Something went wrong while fetching the reviews");
   }
+});
+
+const getSellerByProductId = asyncHandler(async(req,res) => {
+  try {
+    const {id:productId} = req.params;
+  
+    const product = await Product.findById(productId);
+  
+    if(!product) throw new ApiError(404,"Product not found!");
+  
+    const sellerId = product.createdBy;
+  
+    const seller = await User.findById(sellerId).select("-password");
+  
+    if(!seller) throw new ApiError(404,"Seller not found!");
+  
+    return res
+    .status(200)
+    .json(new ApiResponse(200, { seller }, "Seller fetched successfully!"));
+  } catch (error) {
+    throw new ApiError(500,"Something went wrong while fetching the seller!");
+  }
+
 })
   
 
@@ -277,4 +308,5 @@ export {
     addReview,
     getAllReviewsForProduct,
     addProduct,
+    getSellerByProductId,
 }

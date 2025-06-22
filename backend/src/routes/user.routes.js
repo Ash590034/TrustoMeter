@@ -10,7 +10,8 @@ import {
     addProduct,
     getCurrentUser,
     getUserById,
-    getAllReviewsForProduct
+    getAllReviewsForProduct,
+    getSellerByProductId
 } from "../controllers/user.controller.js";
 
 const router = Router();
@@ -22,11 +23,11 @@ router.post("/logout", verifyJWTUser, logout);
 router.get("/me", verifyJWTUser, getCurrentUser);
 
 router.get("/products", getProducts);
-router.post("/products", verifyJWTUser, addProduct); // ✅ Added this line
+router.post("/products", verifyJWTUser, addProduct); 
 router.get("/products/category/:id", getProductsByCategory);
 router.get("/products/:id/reviews", getAllReviewsForProduct);
 router.post("/products/:id/reviews", verifyJWTUser, addReview);
 
-router.get("/sellers/:id", getUserById);
+router.get("/sellers/:id", getSellerByProductId);
 
 export default router;

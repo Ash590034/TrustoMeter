@@ -117,174 +117,181 @@ async function analyzeProduct(product) {
             : 'No Google Search results found.';
 
         const prompt = `
-		You are an expert product authenticity analyst specialized in the Indian market. Your goal is to analyze the provided product details, Google Search summaries, and reverse image search summaries, and produce a precise trust assessment in JSON only. Use the following hardcoded exchange rate for INR↔USD conversions: 1 USD = ₹80. Allow for regional price differences (e.g., taxes, import duties) with a tolerance of ±20% when comparing US-based prices to Indian market prices.
-		
-		INPUTS (may be 'Not specified' or empty):
-		1. **Product Details**:
-		   - Name: ${product.name || 'Not specified'}
-		   - Brand: ${product.brand || 'Not specified'}
-		   - Price: ₹${product.price != null ? product.price.toFixed(2) : 'Not specified'} (INR). Internally convert to USD by: USD_price ≈ (INR_price / 80).
-		   - Description: ${product.description || 'No description provided'}
-		   - Seller: ${product.seller || 'Not specified'}
-		
-		2. **Google Search Results Summary**:
-		${googleSearchSummary}
-		
-		   - This is a block of text or structured snippets; each snippet may include a source identifier (e.g., site name, snippet index). Use those identifiers when referencing evidence.
-		
-		3. **Reverse Image Search Summaries**:
-		${imageSerpSummaries}
-		
-		   - Summaries include occurrences of the image on various domains, with brief context or snippet identifiers. Use these identifiers when citing evidence.
-		
-		TASK: Produce ONLY a JSON object (no extra text) with a trust assessment based strictly on the provided inputs. Follow these structured steps and use weighted scoring across checks. Cite snippet identifiers or quoted text from summaries in every “findings” field.
-		
-		---
-		STEP 1: DATA EXTRACTION
-		- **Price Extraction**:
-		  • From each snippet in Google Search summary, use regex/pattern matching to find price mentions in currencies: ₹, Rs., INR, $, USD, etc.
-		  • Record for each: original amount and currency (e.g., “₹12,000” or “$150”), source identifier (e.g., “snippet #3 from example.com”).
-		  • Convert all non-INR prices to INR using 1 USD = ₹80. If another currency appears (e.g., EUR), note “converted approximately via INR↔USD” if direct rate unavailable.
-		  • Build a list of extracted INR prices for range computation. If none found, record “Insufficient data” for price extraction.
-		- **Brand Mentions**:
-		  • Search summary snippets: find occurrences of the brand in authoritative contexts (“<Brand> official”, “authorized reseller of <Brand>”, “<Brand> India site”, etc.). Record source identifiers.
-		  • If brand is “Not specified”, note absence.
-		- **Seller Reputation Clues**:
-		  • From summaries, extract mentions of the seller name, reviews, ratings, “authorized dealer”, “unverified seller”, forum discussions, scam reports. Record source identifiers.
-		  • If seller not given, mark “Seller not specified” here.
-		- **Image Occurrences**:
-		  • From reverse-image summaries, collect each domain where the image appears. Classify domains as:
-		    - Reputable/manufacturer/official retailer (e.g., brand’s own site, Amazon.in, Flipkart, major Indian electronics retailers).
-		    - Unknown or suspicious sites (e.g., unrelated marketplaces, unclear domains).
-		  • Note contexts: matching product name/model, price mentions on those pages, or mismatches (same image used for different product). Record source identifiers and quoted context.
-		  • If only generic manufacturer stock images appear without actual listing contexts, record as “generic stock/manufacturer image”.
-		  • If no image summaries provided, record “No Images Data”.
-		
-		If any category yields no findings, mark “Insufficient data” for that category.
-		
-		---
-		STEP 2: CONSISTENCY CHECKS & SUB-SCORES
-		For each check, produce:
-		- A normalized sub-score (0–1) based on evidence and predefined weight.
-		- A status or flag.
-		- A detailed findings string referencing snippet identifiers or quoted text.
-		
-		Use the following weight distribution for final scoring (total weight sums to 1):
-		- Description Check: 0.10
-		- Price Check: 0.25
-		- Image Check: 0.30
-		- Seller Check: 0.15
-		- Brand Check: 0.20
-		
-		Normalize each check to a sub-score between 0 (worst) and 1 (best) before weighting. Then trustScore = round((sum of weighted sub-scores) * 100), bounded [0,100].
-		
-		1. **Description Check** (weight 0.10):
-		   - Compare provided description (features, specs, brand mentions) against extracted data:
-		     • If description claims features/specs not corroborated by any reputable snippet, mark as mismatch.
-		     • If description omits brand but brand appears in search evidence (or vice versa), note that.
-		   - Assign sub-score:
-		     • 1.0 if description aligns closely with multiple reputable sources (e.g., specs match known listings).
-		     • ~0.5 if partial or generic match (e.g., some features match but some missing or ambiguous).
-		     • 0.0 if major contradictions (e.g., description says “16GB RAM” but all reputable snippets show only 8GB model) or brand mismatch.
-		   - Status fields:
-		     - isConsistent: true if no direct contradictions; false otherwise.
-		     - quality: "Good" (sub-score > 0.8), "Average" (0.4–0.8), "Poor" (< 0.4).
-		   - Findings: reference specific evidence, e.g., “Description: ‘16GB RAM’ vs snippet #2 from example.com listing only 8GB model.”
-		
-		2. **Price Check** (weight 0.25):
-		   - From extracted INR prices, compute observed range: minINR, maxINR.
-		     • If sources include US-based prices, convert by INR = USD * 80, then apply tolerance ±20%: effective comparison range = [minINR * 0.8, maxINR * 1.2].
-		   - Compare product.price (INR):
-		     • If price within tolerance range: status “Reasonable”; sub-score ~1.0.
-		     • If price moderately outside (10–20% beyond tolerance): status “Slightly Off”; sub-score ~0.5.
-		     • If price clearly outside (>20% below or above): status “Too Low” or “Too High”; sub-score ~0.0.
-		     • If no extracted prices: status “Unknown”; assign sub-score 0.5 (tentative neutral).
-		   - Findings: cite evidence, e.g., “Extracted ₹12,000–₹15,000 from snippet #4, #7 (converted from $150–$187 at ₹80=$1); tolerance range ₹9,600–₹18,000; product price ₹8,500 → >20% below → Too Low.”
-		
-		3. **Image Check** (weight 0.30):
-		   - Determine authenticity:
-		     • ‘Authentic’ (sub-score 1.0) if image appears on multiple reputable or official retailer/manufacturer sites for the same model, with matching context.
-		     • ‘Stock Photo’ (sub-score 0.7) if only generic manufacturer images appear (with no live listing), but matches known official image.
-		     • ‘Suspicious’ (sub-score 0.0) if image appears primarily on unrelated/suspicious sites with mismatched product names/contexts.
-		     • ‘No Images’ (sub-score 0.5) if image data absent or insufficient to decide.
-		   - Findings: list domains and context with snippet identifiers, e.g., “Image on brand-site.in listing ModelX (snippet #5); also on unknownsite.com listing unrelated item ‘XYZ’ (snippet #9) → Suspicious.”
-		
-		4. **Seller Check** (weight 0.15):
-		   - If seller provided:
-		     • If evidence indicates “authorized dealer”, positive reviews on reputable forums/sites: status “Reputable” (sub-score ~1.0).
-		     • If ambiguous (generic marketplace seller, no clear reputation): status “Generic” (sub-score ~0.5).
-		     • If negative mentions or flagged scam/unverified: status “Suspicious” (sub-score 0.0).
-		   - If seller not provided: status “Unknown” (sub-score 0.5).
-		   - Findings: reference evidence, e.g., “SellerName in snippet #3 flagged as unauthorized dealer on forum exampleforum.in.”
-		
-		5. **Brand Check** (weight 0.20):
-		   - Confirm if brand is known/established in category and appears in authoritative contexts in search summaries:
-		     • If brand appears in official or reputable contexts (e.g., manufacturer site, recognized retailer): status “Present” (sub-score 1.0).
-		     • If brand specified but no corroborating evidence in summaries: status “Unverified” (sub-score 0.3).
-		     • If brand “Not specified” or absent and no evidence: status “Missing” (sub-score 0.0).
-		   - Findings: reference evidence, e.g., “BrandName appears in snippet #2 from official brand site”; or “Brand not specified and no mention in any snippet.”
-		
-		---
-		STEP 3: RED FLAG IDENTIFICATION
-		Based on the detailed findings, identify red flags. Use these to inform summary and possibly adjust sub-scores if needed (but primary scoring uses the above weights). For reporting purposes:
-		- Major red flags (critical; reflect sub-score 0.0 in key check):
-		  • Price clearly outside tolerance (>20%): evidence referenced → explicit flag.
-		  • Brand missing/unverified in brand check → flag.
-		  • Image marked Suspicious → flag.
-		  • Seller marked Suspicious → flag.
-		- Minor red flags:
-		  • Slight price mismatch (10–20% beyond tolerance) → note.
-		  • Only generic stock image (no listing) → note.
-		  • Description partial mismatch (sub-score moderate) → note.
-		  • Seller “Generic” or “Unknown” → note.
-		List each red flag as a short factual statement with evidence reference: e.g., “Price ₹8,500 >20% below observed ₹12,000–₹15,000 (snippet #4,#7).”
-		
-		---
-		STEP 4: FINAL SCORING
-		- Compute weighted sum: trustScore = round((description_subscore*0.10 + price_subscore*0.25 + image_subscore*0.30 + seller_subscore*0.15 + brand_subscore*0.20) * 100). Ensure result between 0 and 100.
-		- Even if some data missing, use sub-score defaults (0.5 for Unknown) but clearly note “tentative due to insufficient data” in summary if multiple “Unknown”s.
-		
-		---
-		STEP 5: FINAL OUTPUT JSON
-		Return ONLY this JSON (no extra text):
-		{
-		  "trustScore": <integer 0–100>,
-		  "summary": "<Concise summary referencing key evidence and overall verdict, e.g.: 'Weighted score low: price ₹8,500 >20% below converted range ₹12,000–₹15,000; image appears on unrelated site (snippet #9); brand unverified → low trust.' If multiple unknowns: prefix with 'Tentative:'.>",
-		  "redFlags": [
-		    "<Each red flag, e.g., 'Price ₹8,500 >20% below observed ₹12,000–₹15,000 (snippet #4,#7)'>",
-		    ...
-		  ],
-		  "verification": {
-		    "descriptionCheck": {
-			"isConsistent": <true|false>,
-			"quality": "<Good|Average|Poor>",
-			"findings": "<e.g. 'Description: “16GB RAM” vs snippet #2 shows only 8GB version.' or 'No evidence found in provided summaries for spec claims.'>"
-		    },
-		    "priceCheck": {
-			"status": "<Reasonable|Slightly Off|Too Low|Too High|Unknown>",
-			"findings": "<e.g. 'Extracted ₹12,000–₹15,000 (converted from $150–$187 at ₹80=$1); tolerance range ₹9,600–₹18,000; product ₹8,500 Too Low.'>"
-		    },
-		    "imageCheck": {
-			"authenticity": "<Authentic|Stock Photo|Suspicious|No Images>",
-			"findings": "<e.g. 'Image on brand-site.in listing ModelX (snippet #5); also on unknownsite.com listing unrelated item (snippet #9) → Suspicious.'>"
-		    },
-		    "sellerCheck": {
-			"status": "<Reputable|Generic|Unknown|Suspicious>",
-			"findings": "<e.g. 'SellerName appears in snippet #3 flagged unauthorized.' or 'Seller not specified.'>"
-		    },
-		    "brandCheck": {
-			"status": "<Present|Unverified|Missing>",
-			"findings": "<e.g. 'Brand appears in snippet #2 from official site.' or 'Brand not specified and no mention in any snippet.'>"
-		    }
-		  }
-		}
-		Important:
-		- Use only the provided inputs: Product Details, Google Search summary text, and Reverse Image Search summaries.
-		- Convert USD↔INR using 1 USD = ₹80; apply ±20% tolerance for Indian pricing context.
-		- Always reference snippet identifiers or quoted text in “findings” and red flags.
-		- Do not hallucinate or use external data. If evidence absent, state “No evidence found in provided summaries” and use sub-score 0.5 for Unknown checks.
-		- Return strictly valid JSON as specified, without any additional explanation or text outside the JSON.
-		`; 
+    You are an expert product authenticity analyst specialized in the Indian market. Analyze the provided inputs (Product Details, Google Search summaries, and Reverse Image Search summaries) and produce ONLY a JSON object with a trust assessment. Do NOT include any extra text outside the JSON.
+
+    Use the hardcoded exchange rate 1 USD = ₹80. When comparing US-based prices to Indian market prices, allow ±20% tolerance for regional differences (taxes, import duties).
+
+    ---  
+    INPUTS (each may be "Not specified" or empty):
+    1. **Product Details**:
+    - Name: ${product.name || 'Not specified'}
+    - Brand: ${product.brand || 'Not specified'}
+    - Price: ₹${product.price != null ? product.price.toFixed(2) : 'Not specified'} (INR). Internally, USD_price ≈ (INR_price / 80).
+    - Description: ${product.description || 'No description provided'}
+    2. **Google Search Results Summary**:
+    ${googleSearchSummary}
+    - This is a block of text or structured snippets. Each snippet may include identifiers (e.g., “snippet #3 from example.com”). Reference these identifiers in findings.
+    3. **Reverse Image Search Summaries**:
+    ${imageSerpSummaries}
+    - Summaries list occurrences of the image on various domains, with context or snippet IDs. Reference these in findings.
+
+    ---  
+    TASK: Produce ONLY a valid JSON object, following the schema below. Do not output any explanatory text or additional wrappers.
+
+    ### SCHEMA FOR OUTPUT JSON
+    {
+    "trustScore": <integer 0–100>,
+    "summary": "<Concise summary referencing key evidence and overall verdict>",
+    "redFlags": [
+        "<Short factual red flag with evidence reference>",
+        ...
+    ],
+    "verification": {
+        "descriptionCheck": {
+        "isConsistent": <true|false>,
+        "quality": "<Good|Average|Poor>",
+        "findings": "<Evidence references or note of absence/mismatch>"
+        },
+        "priceCheck": {
+        "status": "<Reasonable|Slightly Off|Too Low|Too High|Unknown>",
+        "findings": "<Extracted price evidence and comparison>"
+        },
+        "imageCheck": {
+        "authenticity": "<Authentic|Stock Photo|Suspicious|No Images>",
+        "findings": "<Domains/contexts with snippet identifiers>"
+        },
+        "brandCheck": {
+        "status": "<Present|Unverified|Missing>",
+        "findings": "<Evidence references or note of absence>"
+        }
+    }
+    }
+
+    ---  
+    PROCESS & GUIDANCE
+
+    1. DATA EXTRACTION
+    - **Price Extraction**:
+        • From each snippet in Google Search summary, use regex/pattern matching to find price mentions (currencies: ₹, Rs., INR, $, USD, etc.).  
+        • For each match, record original amount, currency, and source identifier (e.g., "snippet #4 from example.com").  
+        • Convert non-INR to INR via 1 USD = ₹80. If other currencies appear (e.g., EUR), note “converted approximately via USD↔INR.”  
+        • Build a list of extracted INR prices. If none found, mark “Insufficient data” for price extraction.
+    - **Brand Mentions**:
+        • Search snippets for authoritative mentions: e.g., “<Brand> official”, “authorized reseller of <Brand>”, “<Brand> India site”, etc., recording identifiers.  
+        • If brand is “Not specified”, note absence.
+    - **Seller Reputation Clues**:
+        • From summaries, extract mentions of seller name, reviews, ratings, “authorized dealer”, “unverified seller”, forum discussions, scam reports; record identifiers.  
+        • If seller not provided, mark “Seller not specified.”
+    - **Image Occurrences**:
+        • From reverse-image summaries, collect domains where the image appears. Classify each domain as:
+        - if same image is found with different product names/models, mark as Suspicious.
+        - Reputable/manufacturer/official retailer (e.g., brand site, Amazon.in, Flipkart).  
+        - Unknown or suspicious (unrelated marketplaces, unclear domains).  
+        • Note contexts: matching product name/model, price mentions, or mismatches (same image for different product). Record identifiers and quoted context.  
+        • If only generic manufacturer stock images appear, record “generic stock/manufacturer image.” If no image summaries, record “No Images Data.”
+    - If any category yields no findings, mark “Insufficient data.”
+
+    2. CONSISTENCY CHECKS & SUB-SCORES  
+    Compute a normalized sub-score [0–1] for each check, then combine with weights to get trustScore = round((sum(weight_i * subscore_i)) * 100), bounded [0,100]. If evidence absent, use defaults (sub-score 0.5) but note “Unknown” or “Insufficient data.”
+
+    Weights (sum = 1):
+    - Description Check: 0.10  
+    - Price Check: 0.25  
+    - Image Check: 0.30  
+    - Seller Check: 0.15  
+    - Brand Check: 0.20
+
+    2.1 **Description Check** (weight 0.10)  
+        - Compare provided description against extracted/spec data from reputable snippets.  
+        • If description claims specs not corroborated by any reputable snippet, mark mismatch.  
+        • If description omits brand but brand appears in evidence (or vice versa), note.  
+        - Sub-score:  
+        • 1.0 if description aligns closely with multiple reputable sources.  
+        • ~0.5 if partially matches or generic (some features match but ambiguous).  
+        • 0.0 if major contradictions (e.g., spec conflict) or brand mismatch.  
+        - Fields:  
+        • isConsistent: true if no direct contradictions; false otherwise.  
+        • quality: "Good" (>0.8), "Average" (0.4–0.8), "Poor" (<0.4).  
+        • findings: reference specific evidence, e.g., “Description: '16GB RAM' vs snippet #2 lists only 8GB model.”
+
+    2.2 **Price Check** (weight 0.25)  
+        - From extracted INR prices, compute observed range: [minINR, maxINR].  
+        • For US-based prices, convert via INR = USD * 80, then apply ±20% tolerance: effective comparison range = [minINR * 0.8, maxINR * 1.2].  
+        - Compare product.price (INR):  
+        • Within tolerance: status “Reasonable”, sub-score ~1.0.  
+        • Moderately outside (10–20% beyond tolerance): status “Slightly Off”, sub-score ~0.5.  
+        • Clearly outside (>20% below/above): status “Too Low” or “Too High”, sub-score ~0.0.  
+        • No extracted prices: status “Unknown”, sub-score 0.5 (tentative neutral).  
+        - findings: cite evidence, e.g., “Extracted ₹12,000–₹15,000 (from snippet #4, #7; converted from $150–$187 at ₹80); tolerance ₹9,600–₹18,000; product price ₹8,500 → Too Low.”
+
+    2.3 **Image Check** (weight 0.30)  
+        - Determine authenticity:  
+        • “Authentic” (sub-score 1.0): image appears on multiple reputable/official sites with matching model context.  
+        • “Stock Photo” (sub-score 0.7): only generic manufacturer images, but matches known official image.  
+        • “Suspicious” (sub-score 0.0): image appears mainly on unrelated/suspicious sites with mismatched contexts.  
+        • “No Images” (sub-score 0.5): image data absent or insufficient.  
+        - findings: list domains and contexts with snippet IDs, e.g., “Image on brand-site.in listing ModelX (snippet #5); also on unknownsite.com listing unrelated item (snippet #9) → Suspicious.”
+
+    2.4 **Brand Check** (weight 0.20)  
+        - Confirm if brand is known/established and appears in authoritative contexts:  
+        • If brand appears in official/reputable contexts: status “Present” (sub-score 1.0).  
+        • Brand specified but no corroboration: status “Unverified” (sub-score 0.3).  
+        • Brand “Not specified” or absent with no mentions: status “Missing” (sub-score 0.0).  
+        - findings: e.g., “Brand appears in snippet #2 from official site” or “Brand not specified and no mention in any snippet.”
+
+    3. RED FLAG IDENTIFICATION  
+    Based on findings and sub-scores, list red flags as short statements with evidence references.  
+    - Major red flags (sub-score 0.0 in key check):  
+        • Price clearly outside tolerance (>20%): “Price ₹X >20% [below/above] range ₹A–₹B (snippet #...).”  
+        • Brand missing/unverified.  
+        • Image marked Suspicious.  
+    - Minor red flags:  
+        • Slight price mismatch (10–20% beyond).  
+        • Only generic stock images.  
+        • Description partial mismatch.  
+    Use evidence references in each.
+
+    4. FINAL SCORING  
+    - Compute weighted sum:  
+        trustScore = round((description_subscore*0.30 + price_subscore*0.30 + image_subscore*0.30 + brand_subscore*0.10) * 100).  
+    - Ensure result between 0 and 100.  
+    - If multiple “Unknown” categories, summary should note “Tentative due to insufficient data.”
+
+    5. OUTPUT JSON  
+    - Return strictly valid JSON matching the schema above.  
+    - Fields must be exactly those keys: trustScore, summary, redFlags, verification (with its subfields).  
+    - In each “findings” or redFlag, reference snippet identifiers or quoted text from provided summaries.  
+    - Do NOT hallucinate or fetch external data. If evidence is absent, explicitly state “No evidence found in provided summaries” or “Insufficient data,” and use neutral sub-score defaults.
+
+    Example of expected output structure:
+    {
+    "trustScore": 65,
+    "summary": "Moderate confidence: price ₹87,900 within tolerance; description detailed but generic marketing; image appears stock-like; brand present; seller unknown.",
+    "redFlags": [
+        "Only generic stock images found (snippet #3, #5).",
+        "Seller not specified."
+    ],
+    "verification": {
+        "descriptionCheck": {
+        "isConsistent": true,
+        "quality": "Average",
+        "findings": "Description details match specs in snippets #2 and #4, but text is generic."
+        },
+        "priceCheck": {
+        "status": "Reasonable",
+        "findings": "Extracted ₹85,000–₹90,000 from snippet #6; tolerance ₹68,000–₹108,000; product ₹87,900 within range."
+        },
+        "imageCheck": {
+        "authenticity": "Stock Photo",
+        "findings": "Only manufacturer stock images appear (snippet #3, #5); no live listing images."
+        },
+        "brandCheck": {
+        "status": "Present",
+        "findings": "Brand appears in snippet #2 from official brand site."
+        }
+    }
+    }
+`; 
 
         let result, response, text;
         try {
@@ -318,7 +325,7 @@ async function analyzeProduct(product) {
 
     } catch (error) {
         return {
-            trustScore: 0,
+            trustScore: 100,
             summary: `Analysis failed: ${error.message}`,
             redFlags: ['An error occurred during analysis.'],
             analyzedAt: new Date().toISOString(),

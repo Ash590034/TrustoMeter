@@ -11,6 +11,11 @@ const productSchema = new Schema(
       type: String,
       required: true,
     },
+    createdBy: {
+      type: Schema.Types.ObjectId,
+      ref: 'User',
+      required: true
+    },
     price: {
       type: Number,
       required: true,
@@ -74,13 +79,6 @@ const productSchema = new Schema(
           authenticity: {
             type: String,
             enum: ['Authentic', 'Stock Photo', 'Suspicious', 'No Images', 'Unknown'],
-          },
-          findings: String,
-        },
-        sellerCheck: {
-          status: {
-            type: String,
-            enum: ['Reputable', 'Generic', 'Unknown', 'Suspicious'],
           },
           findings: String,
         },

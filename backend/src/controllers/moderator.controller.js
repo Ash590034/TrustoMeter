@@ -10,6 +10,7 @@ import { Moderator } from "../models/moderator.model.js"
 const options = {
   httpOnly: true,
   secure: true,
+  sameSite: "lax"
 };
 
 const generateModeratorToken = async (moderatorId) => {
@@ -19,7 +20,7 @@ const generateModeratorToken = async (moderatorId) => {
 
   const token = jwt.sign(
     { _id: moderator._id, email: moderator.email, fullName: moderator.fullName },
-    process.env.TOKEN_SECRET,
+    process.env.JWT_SECRET,
   );
   return { token };
 };
@@ -42,7 +43,7 @@ const registerModerator = asyncHandler(async (req, res) => {
   
     res
     .status(201)
-    .cookie('modToken', token, options)
+    .cookie('token', token, options)
     .json(new ApiResponse(201, {moderator: moderatorObj}, 'Moderator registered successfully!'));
   } catch (error) {
     throw new ApiError(500, "Something went wrong while registering the moderator!");
@@ -67,7 +68,7 @@ const loginModerator = asyncHandler(async (req, res) => {
   
     res
       .status(200)
-      .cookie('modToken', token, options)
+      .cookie('token', token, options)
       .json(new ApiResponse(200, { moderator: safeModerator, token }, 'Moderator logged in successfully!'));
   } catch (error) {
     throw new ApiError(500, "Something went wrong while logging in the moderator!");
@@ -77,7 +78,7 @@ const loginModerator = asyncHandler(async (req, res) => {
 const logoutModerator = asyncHandler(async (req, res) => {
   res
     .status(200)
-    .clearCookie('modToken', options)
+    .clearCookie('token', options)
     .json(new ApiResponse(200, {}, 'Moderator logged out successfully!'));
 });
 
@@ -99,7 +100,10 @@ const approveFlaggedReview = asyncHandler(async (req, res) => {
     try {
       const updatedReview = await Review.findByIdAndUpdate(
         reviewId,
-        { approvedByModerator: true },
+        { 
+          approvedByModerator: true,
+          isFlagged: false,
+        },
         { new: true }
       );
   
@@ -142,6 +146,21 @@ const dismissFlaggedReview = asyncHandler(async (req, res) => {
   
       product.ratings.average = newAvg;
       product.ratings.count = newCount;
+
+      const userId = product.createdBy;
+
+      await User.findByIdAndUpdate(
+        userId,
+        [
+          {
+            $set: {
+              trustScore: {
+                $max: [{ $subtract: ["$trustScore", 1] }, 0]
+              }
+            }
+          }
+        ]
+      );
   
       await product.save();
   
@@ -157,7 +176,10 @@ const approveFlaggedProduct = asyncHandler(async (req, res) => {
     try {
       const updatedProduct = await Product.findByIdAndUpdate(
         productId,
-        { approvedByModerator: true },
+        { 
+          approvedByModerator: true,
+          isFlagged: false,
+        },
         { new: true }
       );
   
@@ -179,13 +201,27 @@ const dismissFlaggedProduct = asyncHandler(async (req, res) => {
   try {
       await Review.deleteMany({ product: productId });
 
-      await User.updateMany(
-          { listedProducts: productId },
-          { $pull: { listedProducts: productId } }
-      );
-
       const deletedProduct = await Product.findByIdAndDelete(productId);
 
+      const userId = deletedProduct.createdBy;
+
+      await User.findByIdAndUpdate(userId, {
+        $pull: { listedProducts: productId }
+      });
+
+      await User.findByIdAndUpdate(
+        userId,
+        [
+          {
+            $set: {
+              trustScore: {
+                $max: [{ $subtract: ["$trustScore", 20] }, 0]
+              }
+            }
+          }
+        ]
+      );
+      
       if (!deletedProduct) {
           throw new ApiError(404, "Product not found");
       }
